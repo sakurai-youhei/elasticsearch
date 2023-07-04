@@ -1,0 +1,15 @@
+"Test that the affine_transformation processor is loaded in Elasticsearch":
+  - skip:
+      features: contains
+
+  - do:
+      cluster.state: {}
+  # Get master node id
+  - set: { master_node: master }
+
+  - do:
+      nodes.info:
+        metric: [ ingest ]
+        filter_path: nodes.*.ingest.processors
+
+  - contains: { nodes.$master.ingest.processors: { type: affine_transformation } }

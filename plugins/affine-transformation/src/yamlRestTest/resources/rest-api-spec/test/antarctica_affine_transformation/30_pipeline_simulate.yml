@@ -1,0 +1,63 @@
+---
+"Test simulate with affine_transformation processor with defaults":
+  - do:
+      ingest.simulate:
+        body: >
+          {
+            "pipeline": {
+              "description": "_description",
+              "processors": [
+                {
+                  "affine_transformation" : {
+                    "field" : "vector",
+                    "transformation_matrix_field" : "transformation_matrix"
+                  }
+                }
+              ]
+            },
+            "docs": [
+              {
+                "_index": "index",
+                "_id": "id",
+                "_source": {
+                  "vector": [2,2,2],
+                  "transformation_matrix": "[[1,0,0,-3],[0,1,0,-3],[0, 0, 1,-3],[0,0,0,1]]"
+                }
+              }
+            ]
+          }
+  - length: { docs: 1 }
+  - match: { docs.0.doc._source.vector: [-1.0,-1.0,-1.0] }
+---
+"Test simulate with affine_transformation processor with non-defaults":
+  - do:
+      ingest.simulate:
+        body: >
+          {
+            "pipeline": {
+              "description": "_description",
+              "processors": [
+                {
+                  "affine_transformation" : {
+                    "field" : "vector",
+                    "target_field" : "transformed_vector",
+                    "transformation_matrix_field" : "transformation_matrix"
+                  }
+                }
+              ]
+            },
+            "docs": [
+              {
+                "_index": "index",
+                "_id": "id",
+                "_source": {
+                  "vector": [2,2],
+                  "transformation_matrix": "[[1,0,-3],[0,1,-3],[0,0,1]]"
+                }
+              }
+            ]
+          }
+  - length: { docs: 1 }
+  - match: { docs.0.doc._source.vector: [2,2] }
+  - match: { docs.0.doc._source.transformed_vector: [-1.0,-1.0] }
+  - match: { docs.0.doc._source.transformation_matrix: "[[1,0,-3],[0,1,-3],[0,0,1]]" }

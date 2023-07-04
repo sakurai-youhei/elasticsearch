@@ -1,0 +1,76 @@
+setup:
+  - do:
+      indices.create:
+        index: index-with-dense-vector
+        body:
+          mappings:
+            properties:
+              vector:
+                type: dense_vector
+                dims: 3
+                index: true
+                similarity: l2_norm
+  - do:
+      index:
+        index: index-with-dense-vector
+        body:
+          vector: [1,1,1]
+          text: "This is a pen."
+  - do:
+      index:
+        index: index-with-dense-vector
+        body:
+          vector: [-1,-1,-1]
+          text: "This is an apple."
+  - do:
+      indices.refresh: {}
+  - do:
+      indices.forcemerge:
+        index: index-with-dense-vector
+        max_num_segments: 1
+---
+"Test knn with translation by knn.query_vector_builder.affine_transformation":
+  - do:
+      search:
+        index: index-with-dense-vector
+        body:
+          knn:
+            field: vector
+            query_vector_builder:
+              affine_transformation:
+                query_vector: [2,2,2]
+                transformation_matrix: |
+                  [
+                   [1, 0, 0, -3],
+                   [0, 1, 0, -3],
+                   [0, 0, 1, -3],
+                   [0, 0, 0,  1]
+                  ]
+            k: 1
+            num_candidates: 10
+  - match: { hits.total.value: 1 }
+  - match: { hits.hits.0._source.vector: [-1,-1,-1] }
+  - match: { hits.hits.0._source.text: "This is an apple." }
+---
+"Test knn with rotation+scaling by knn.query_vector_builder.affine_transformation":
+  - do:
+      search:
+        index: index-with-dense-vector
+        body:
+          knn:
+            field: vector
+            query_vector_builder:
+              affine_transformation:
+                query_vector: [2,2,2]
+                transformation_matrix: |
+                  [
+                   [0.5,    0,    0, 0],
+                   [  0, -0.5,    0, 0],
+                   [  0,    0, -0.5, 0],
+                   [  0,    0,    0, 1]
+                  ]
+            k: 1
+            num_candidates: 10
+  - match: { hits.total.value: 1 }
+  - match: { hits.hits.0._source.vector: [-1,-1,-1] }
+  - match: { hits.hits.0._source.text: "This is an apple." }
