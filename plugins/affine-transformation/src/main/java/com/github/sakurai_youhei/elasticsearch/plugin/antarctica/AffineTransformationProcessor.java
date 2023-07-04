@@ -14,6 +14,7 @@ import org.elasticsearch.ingest.AbstractProcessor;
 import org.elasticsearch.ingest.IngestDocument;
 import org.elasticsearch.ingest.Processor;
 
+import java.util.AbstractList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -66,14 +67,18 @@ public final class AffineTransformationProcessor extends AbstractProcessor {
     private static RealMatrix tryParseTransformationMatrix(Object o) {
         if (o instanceof String source) {
             return AssemblingUtils.parseTransformationMatrix(source);
+        } else if (o instanceof AbstractList) {
+            return AssemblingUtils.parseTransformationMatrix(o.toString());
         } else {
-            throw new IllegalArgumentException(format("value [%s] of type [%s] cannot be cast to String", o, o.getClass().getName()));
+            throw new IllegalArgumentException(
+                format("value [%s] of type [%s] cannot be cast to String nor AbstractList", o, o.getClass().getName())
+            );
         }
     }
 
     @Override
     public IngestDocument execute(final IngestDocument document) throws Exception {
-        logger.trace("Called: execute([{}])", document);
+        logger.trace("Called: execute(document=[{}])", document);
 
         Object fieldValue = document.getFieldValue(field, Object.class, ignoreMissing);
         Object transformationMatrixFieldValue = document.getFieldValue(transformationMatrixField, Object.class, ignoreMissing);
@@ -88,11 +93,15 @@ public final class AffineTransformationProcessor extends AbstractProcessor {
         }
 
         final double[] originalVector;
-        if (fieldValue instanceof List<?>) {
+        if (fieldValue instanceof double[] v) {
+            originalVector = v;
+        } else if (fieldValue instanceof float[] v) {
+            originalVector = AssemblingUtils.toDoubleArray(v);
+        } else if (fieldValue instanceof List<?>) {
             originalVector = AssemblingUtils.extractDoubleArray(fieldValue);
         } else {
             throw new IllegalArgumentException(
-                format("field [%s] of type [%s] cannot be cast to List", field, fieldValue.getClass().getName())
+                format("field [%s] of type [%s] cannot be cast to double[], float[], nor List", field, fieldValue.getClass().getName())
             );
         }
 

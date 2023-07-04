@@ -29,6 +29,11 @@ setup:
         index: index-with-dense-vector
         max_num_segments: 1
 ---
+teardown:
+  - do:
+      indices.delete:
+        index: index-with-dense-vector
+---
 "Test knn with translation by knn.query_vector_builder.affine_transformation":
   - do:
       search:

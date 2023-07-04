@@ -29,6 +29,11 @@ setup:
         index: index-with-dense-vector
         max_num_segments: 1
 ---
+teardown:
+  - do:
+      indices.delete:
+        index: index-with-dense-vector
+---
 "query vector builder: (2,2) -> translation (+3,+3) -> rotation +pi/2  -> rotation +pi/2":
   - do:
       search:
@@ -67,7 +72,7 @@ setup:
   - match: { hits.hits.0._source.vector: [-1,-1] }
   - match: { hits.hits.0._source.text: "This is an apple." }
 ---
-"ingest processor: (2,2) -> rotation +pi/2 -> do nothing -> translation (+1,+1)":
+"ingest processor - strings: (2,2) -> rotation +pi/2 -> do nothing -> translation (+1,+1)":
   - do:
       ingest.simulate:
         body: >
@@ -90,9 +95,55 @@ setup:
                 "_source": {
                   "vector": [2,2],
                   "transformation_matrix": [
-                    "[[0,-1,0],[1,0,0],[0, 0, 1]]",
-                    "[[1,0,0],[0,1,0],[0, 0, 1]]",
-                    "[[1,0,1],[0,1,1],[0, 0, 1]]"
+                    "[[0,-1,0],[1,0,0],[0,0,1]]",
+                    "[[1,0,0],[0,1,0],[0,0,1]]",
+                    "[[1,0,1],[0,1,1],[0,0,1]]"
+                  ]
+                }
+              }
+            ]
+          }
+  - length: { docs: 1 }
+  - match: { docs.0.doc._source.vector: [-1.0,3.0] }
+---
+"ingest processor - arrays: (2,2) -> rotation +pi/2 -> do nothing -> translation (+1,+1)":
+  - do:
+      ingest.simulate:
+        body: >
+          {
+            "pipeline": {
+              "description": "_description",
+              "processors": [
+                {
+                  "affine_transformation" : {
+                    "field" : "vector",
+                    "transformation_matrix_field" : "transformation_matrix"
+                  }
+                }
+              ]
+            },
+            "docs": [
+              {
+                "_index": "index",
+                "_id": "id",
+                "_source": {
+                  "vector": [2,2],
+                  "transformation_matrix": [
+                    [
+                     [0,-1, 0],
+                     [1, 0, 0],
+                     [0, 0, 1]
+                    ],
+                    [
+                     [1, 0, 0],
+                     [0, 1, 0],
+                     [0, 0, 1]
+                    ],
+                    [
+                     [1, 0, 1],
+                     [0, 1, 1],
+                     [0, 0, 1]
+                    ]
                   ]
                 }
               }

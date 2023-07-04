@@ -10,7 +10,6 @@ package com.github.sakurai_youhei.elasticsearch.plugin.antarctica;
 import org.apache.commons.math3.linear.RealMatrix;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.lucene.util.SetOnce;
 import org.elasticsearch.TransportVersion;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.client.internal.Client;
@@ -57,7 +56,7 @@ public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilde
     }
 
     public static AffineTransformationQueryVectorBuilder fromXContent(XContentParser parser) throws IOException {
-        logger.trace("Called: fromXContent([{}])", parser);
+        logger.trace("Called: fromXContent(parser=[{}])", parser);
 
         return PARSER.parse(parser, null);
     }
@@ -72,7 +71,7 @@ public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilde
         String transformationMatrix
     ) {
         logger.trace(
-            "Called: AffineTransformationQueryVectorBuilder([{}], [{}], [{}])",
+            "Called: AffineTransformationQueryVectorBuilder(queryVector=[{}], queryVectorBuilder=[{}], transformationMatrix=[{}])",
             queryVector,
             queryVectorBuilder,
             transformationMatrix
@@ -94,7 +93,7 @@ public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilde
     }
 
     public AffineTransformationQueryVectorBuilder(StreamInput in) throws IOException {
-        logger.trace("Called: AffineTransformationQueryVectorBuilder([{}])", in);
+        logger.trace("Called: AffineTransformationQueryVectorBuilder(in=[{}])", in);
 
         this.queryVector = in.readFloatArray();
         if (in.getTransportVersion().onOrAfter(TransportVersion.V_8_7_0)) {
@@ -121,7 +120,7 @@ public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilde
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        logger.trace("Called: StreamOutput([{}])", out);
+        logger.trace("Called: StreamOutput(out=[{}])", out);
 
         out.writeFloatArray(queryVector);
         if (out.getTransportVersion().before(TransportVersion.V_8_7_0) && queryVectorBuilder != null) {
@@ -141,7 +140,7 @@ public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilde
 
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
-        logger.trace("Called: toXContent([{}], [{}])", builder, params);
+        logger.trace("Called: toXContent(builder=[{}], params=[{}])", builder, params);
 
         if (queryVectorBuilder != null) {
             builder.startObject(QUERY_VECTOR_BUILDER_FIELD.getPreferredName());
@@ -154,42 +153,44 @@ public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilde
         return builder;
     }
 
-    private float[] chain(Client client) throws Exception {
-        SetOnce<float[]> vSet = new SetOnce<>();
-        SetOnce<Exception> eSet = new SetOnce<>();
-        queryVectorBuilder.buildVector(client, new ActionListener<float[]>() {
-            @Override
-            public void onResponse(float[] v) {
-                vSet.set(v);
-            }
-
-            public void onFailure(Exception e) {
-                eSet.set(e);
-            }
-        });
-        if (eSet.get() != null) {
-            throw eSet.get();
-        }
-        float[] vector = vSet.get();
-        if (vector == null) {
-            throw new IllegalArgumentException(
-                format(
-                    "[%s] with name [%s] returned null query_vector",
-                    QUERY_VECTOR_BUILDER_FIELD.getPreferredName(),
-                    queryVectorBuilder.getWriteableName()
-                )
-            );
-        }
-        return vector;
-    }
-
     @Override
     public void buildVector(Client client, ActionListener<float[]> listener) {
-        logger.trace("Called: buildVector([{}], [{}])", client, listener);
+        logger.trace("Called: buildVector(client=[{}], listener=[{}])", client, listener);
+
+        if (queryVectorBuilder == null) {
+            transformVector(queryVector, listener);
+        } else {
+            queryVectorBuilder.buildVector(client, new ActionListener<float[]>() {
+                @Override
+                public void onResponse(float[] v) {
+                    if (v == null) {
+                        listener.onFailure(
+                            new IllegalArgumentException(
+                                format(
+                                    "[%s] with name [%s] returned null query_vector",
+                                    QUERY_VECTOR_BUILDER_FIELD.getPreferredName(),
+                                    queryVectorBuilder.getWriteableName()
+                                )
+                            )
+                        );
+                    } else {
+                        transformVector(v, listener);
+                    }
+                }
+
+                @Override
+                public void onFailure(Exception e) {
+                    listener.onFailure(e);
+                }
+            });
+        }
+    }
+
+    private void transformVector(float[] v, ActionListener<float[]> listener) {
+        logger.trace("Called: transformVector(v=[{}], listener=[{}])", v, listener);
 
         try {
-            double[] v = queryVectorBuilder != null ? toDoubleArray(chain(client)) : toDoubleArray(queryVector);
-            RealMatrix vector = AssemblingUtils.argumentVector(v);
+            RealMatrix vector = AssemblingUtils.argumentVector(toDoubleArray(v));
             RealMatrix matrix = AssemblingUtils.parseTransformationMatrix(transformationMatrix);
             logger.trace("Affine transformation: [{}] x [{}]", matrix, vector);
 
@@ -203,7 +204,7 @@ public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilde
 
     @Override
     public boolean equals(Object o) {
-        logger.trace("Called: equals([{}])", o);
+        logger.trace("Called: equals(o=[{}])", o);
 
         if (o == null) {
             return false;
