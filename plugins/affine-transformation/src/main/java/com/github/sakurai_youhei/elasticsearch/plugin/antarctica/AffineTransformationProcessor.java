@@ -14,9 +14,11 @@ import org.elasticsearch.ingest.AbstractProcessor;
 import org.elasticsearch.ingest.IngestDocument;
 import org.elasticsearch.ingest.Processor;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import static org.elasticsearch.common.Strings.format;
 import static org.elasticsearch.ingest.ConfigurationUtils.readBooleanProperty;
 import static org.elasticsearch.ingest.ConfigurationUtils.readStringProperty;
 
@@ -61,34 +63,61 @@ public final class AffineTransformationProcessor extends AbstractProcessor {
         return transformationMatrixField;
     }
 
+    private static RealMatrix tryParseTransformationMatrix(Object o) {
+        if (o instanceof String source) {
+            return AssemblingUtils.parseTransformationMatrix(source);
+        } else {
+            throw new IllegalArgumentException(format("value [%s] of type [%s] cannot be cast to String", o, o.getClass().getName()));
+        }
+    }
+
     @Override
     public IngestDocument execute(final IngestDocument document) throws Exception {
         logger.trace("Called: execute([{}])", document);
 
         Object fieldValue = document.getFieldValue(field, Object.class, ignoreMissing);
-        String transformationMatrixFieldValue = document.getFieldValue(transformationMatrixField, String.class, ignoreMissing);
+        Object transformationMatrixFieldValue = document.getFieldValue(transformationMatrixField, Object.class, ignoreMissing);
         Object newValue;
 
         if (fieldValue == null || transformationMatrixFieldValue == null && ignoreMissing) {
             return document;
         } else if (fieldValue == null) {
-            throw new IllegalArgumentException("field [" + field + "] is null, cannot process it.");
+            throw new IllegalArgumentException(format("field [%s] is null, cannot process it.", field));
         } else if (transformationMatrixFieldValue == null) {
-            throw new IllegalArgumentException("field [" + transformationMatrixField + "] is null, cannot process it.");
+            throw new IllegalArgumentException(format("field [%s] is null, cannot process it.", transformationMatrixField));
         }
 
         final double[] originalVector;
         if (fieldValue instanceof List<?>) {
-            originalVector = AssemblingUtils.extractVector(fieldValue);
+            originalVector = AssemblingUtils.extractDoubleArray(fieldValue);
         } else {
             throw new IllegalArgumentException(
-                "field [" + field + "] of type [" + fieldValue.getClass().getName() + "] cannot be cast to [" + List.class.getName() + "]"
+                format("field [%s] of type [%s] cannot be cast to List", field, fieldValue.getClass().getName())
             );
         }
 
-        RealMatrix matrix = AssemblingUtils.parseTransformationMatrix(transformationMatrixFieldValue);
+        RealMatrix matrix;
+        try {
+            matrix = tryParseTransformationMatrix(transformationMatrixFieldValue);
+        } catch (IllegalArgumentException e) {
+            if (transformationMatrixFieldValue instanceof List<?> list) {
+                if (list.isEmpty()) {
+                    throw new IllegalArgumentException(format("field [%s] is empty array", transformationMatrixField));
+                }
+                Iterator<?> iter = list.iterator();
+                matrix = tryParseTransformationMatrix(iter.next());
+                while (iter.hasNext()) {
+                    RealMatrix m = tryParseTransformationMatrix(iter.next());
+                    logger.trace("Transformation matrix: [{}] x [{}]", m, matrix);
+                    matrix = m.multiply(matrix);
+                }
+            } else {
+                throw e;
+            }
+        }
+
         RealMatrix vector = AssemblingUtils.argumentVector(originalVector);
-        logger.trace("Affine Transformation: [{}] x [{}]", matrix, vector);
+        logger.trace("Affine transformation: [{}] x [{}]", matrix, vector);
 
         double[] transformedVector = AssemblingUtils.unargumentVector(matrix.multiply(vector));
         logger.trace("Transformed: [{}] to [{}]", originalVector, transformedVector);

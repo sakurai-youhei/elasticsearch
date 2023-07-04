@@ -1,8 +1,6 @@
 
 apply plugin: 'elasticsearch.esplugin'
-//apply plugin: 'elasticsearch.yaml-rest-test'
 apply plugin: 'elasticsearch.legacy-yaml-rest-test'
-apply plugin: 'elasticsearch.legacy-yaml-rest-compat-test'
 
 esplugin {
   name 'affine-transformation'

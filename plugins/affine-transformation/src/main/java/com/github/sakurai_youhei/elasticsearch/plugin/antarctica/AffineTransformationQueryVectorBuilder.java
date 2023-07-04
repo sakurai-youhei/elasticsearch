@@ -10,6 +10,7 @@ package com.github.sakurai_youhei.elasticsearch.plugin.antarctica;
 import org.apache.commons.math3.linear.RealMatrix;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.lucene.util.SetOnce;
 import org.elasticsearch.TransportVersion;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.client.internal.Client;
@@ -24,25 +25,34 @@ import org.elasticsearch.xcontent.XContentParser;
 import java.io.IOException;
 import java.util.Objects;
 
+import static com.github.sakurai_youhei.elasticsearch.plugin.antarctica.AssemblingUtils.toDoubleArray;
+import static com.github.sakurai_youhei.elasticsearch.plugin.antarctica.AssemblingUtils.toFloatArray;
 import static java.util.Objects.requireNonNull;
 import static org.elasticsearch.common.Strings.format;
 import static org.elasticsearch.xcontent.ConstructingObjectParser.constructorArg;
+import static org.elasticsearch.xcontent.ConstructingObjectParser.optionalConstructorArg;
 
 public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilder {
     private static final Logger logger = LogManager.getLogger(AffineTransformationQueryVectorBuilder.class);
 
     public static final String NAME = "affine_transformation";
     public static final ParseField QUERY_VECTOR_FIELD = new ParseField("query_vector");
+    public static final ParseField QUERY_VECTOR_BUILDER_FIELD = new ParseField("query_vector_builder");
     public static final ParseField TRANSFORMATION_MATRIX_FIELD = new ParseField("transformation_matrix");
     public static final ConstructingObjectParser<AffineTransformationQueryVectorBuilder, Void> PARSER = new ConstructingObjectParser<>(
         NAME,
         args -> {
-            final double[] vector = AssemblingUtils.extractVector(args[0]);
-            return new AffineTransformationQueryVectorBuilder(vector, (String) args[1]);
+            final float[] vector = args[0] != null ? AssemblingUtils.extractFloatArray(args[0]) : null;
+            return new AffineTransformationQueryVectorBuilder(vector, (QueryVectorBuilder) args[1], (String) args[2]);
         }
     );
     static {
-        PARSER.declareDoubleArray(constructorArg(), QUERY_VECTOR_FIELD);
+        PARSER.declareFloatArray(optionalConstructorArg(), QUERY_VECTOR_FIELD);
+        PARSER.declareNamedObject(
+            optionalConstructorArg(),
+            (p, c, n) -> p.namedObject(QueryVectorBuilder.class, n, c),
+            QUERY_VECTOR_BUILDER_FIELD
+        );
         PARSER.declareString(constructorArg(), TRANSFORMATION_MATRIX_FIELD);
     }
 
@@ -52,20 +62,46 @@ public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilde
         return PARSER.parse(parser, null);
     }
 
-    final double[] queryVector;
+    final float[] queryVector;
+    final QueryVectorBuilder queryVectorBuilder;
     final String transformationMatrix;
 
-    private AffineTransformationQueryVectorBuilder(double[] queryVector, String transformationMatrix) {
-        logger.trace("Called: AffineTransformationQueryVectorBuilder([{}], [{}])", queryVector, transformationMatrix);
+    private AffineTransformationQueryVectorBuilder(
+        float[] queryVector,
+        QueryVectorBuilder queryVectorBuilder,
+        String transformationMatrix
+    ) {
+        logger.trace(
+            "Called: AffineTransformationQueryVectorBuilder([{}], [{}], [{}])",
+            queryVector,
+            queryVectorBuilder,
+            transformationMatrix
+        );
 
-        this.queryVector = requireNonNull(queryVector, format("[%s] cannot be null", QUERY_VECTOR_FIELD));
+        if (queryVector == null && queryVectorBuilder == null) {
+            throw new IllegalArgumentException(
+                format(
+                    "either [%s] or [%s] must be provided",
+                    QUERY_VECTOR_BUILDER_FIELD.getPreferredName(),
+                    QUERY_VECTOR_FIELD.getPreferredName()
+                )
+            );
+        }
+
+        this.queryVector = queryVector == null ? new float[0] : queryVector;
+        this.queryVectorBuilder = queryVectorBuilder;
         this.transformationMatrix = requireNonNull(transformationMatrix, format("[%s] cannot be null", TRANSFORMATION_MATRIX_FIELD));
     }
 
     public AffineTransformationQueryVectorBuilder(StreamInput in) throws IOException {
         logger.trace("Called: AffineTransformationQueryVectorBuilder([{}])", in);
 
-        this.queryVector = in.readDoubleArray();
+        this.queryVector = in.readFloatArray();
+        if (in.getTransportVersion().onOrAfter(TransportVersion.V_8_7_0)) {
+            this.queryVectorBuilder = in.readOptionalNamedWriteable(QueryVectorBuilder.class);
+        } else {
+            this.queryVectorBuilder = null;
+        }
         this.transformationMatrix = in.readString();
     }
 
@@ -86,17 +122,65 @@ public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilde
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         logger.trace("Called: StreamOutput([{}])", out);
+
+        out.writeFloatArray(queryVector);
+        if (out.getTransportVersion().before(TransportVersion.V_8_7_0) && queryVectorBuilder != null) {
+            throw new IllegalArgumentException(
+                format(
+                    "cannot serialize [%s] to older node of version [%s]",
+                    QUERY_VECTOR_BUILDER_FIELD.getPreferredName(),
+                    out.getTransportVersion()
+                )
+            );
+        }
+        if (out.getTransportVersion().onOrAfter(TransportVersion.V_8_7_0)) {
+            out.writeOptionalNamedWriteable(queryVectorBuilder);
+        }
+        out.writeString(transformationMatrix);
     }
 
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         logger.trace("Called: toXContent([{}], [{}])", builder, params);
 
-        builder.startObject();
-        builder.field(QUERY_VECTOR_FIELD.getPreferredName(), queryVector);
+        if (queryVectorBuilder != null) {
+            builder.startObject(QUERY_VECTOR_BUILDER_FIELD.getPreferredName());
+            builder.field(queryVectorBuilder.getWriteableName(), queryVectorBuilder);
+            builder.endObject();
+        } else {
+            builder.array(QUERY_VECTOR_FIELD.getPreferredName(), queryVector);
+        }
         builder.field(TRANSFORMATION_MATRIX_FIELD.getPreferredName(), transformationMatrix);
-        builder.endObject();
         return builder;
+    }
+
+    private float[] chain(Client client) throws Exception {
+        SetOnce<float[]> vSet = new SetOnce<>();
+        SetOnce<Exception> eSet = new SetOnce<>();
+        queryVectorBuilder.buildVector(client, new ActionListener<float[]>() {
+            @Override
+            public void onResponse(float[] v) {
+                vSet.set(v);
+            }
+
+            public void onFailure(Exception e) {
+                eSet.set(e);
+            }
+        });
+        if (eSet.get() != null) {
+            throw eSet.get();
+        }
+        float[] vector = vSet.get();
+        if (vector == null) {
+            throw new IllegalArgumentException(
+                format(
+                    "[%s] with name [%s] returned null query_vector",
+                    QUERY_VECTOR_BUILDER_FIELD.getPreferredName(),
+                    queryVectorBuilder.getWriteableName()
+                )
+            );
+        }
+        return vector;
     }
 
     @Override
@@ -104,14 +188,15 @@ public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilde
         logger.trace("Called: buildVector([{}], [{}])", client, listener);
 
         try {
+            double[] v = queryVectorBuilder != null ? toDoubleArray(chain(client)) : toDoubleArray(queryVector);
+            RealMatrix vector = AssemblingUtils.argumentVector(v);
             RealMatrix matrix = AssemblingUtils.parseTransformationMatrix(transformationMatrix);
-            RealMatrix vector = AssemblingUtils.argumentVector(queryVector);
-            logger.trace("Affine Transformation: [{}] x [{}]", matrix, vector);
+            logger.trace("Affine transformation: [{}] x [{}]", matrix, vector);
 
-            float[] transformedQueryVector = AssemblingUtils.unargumentVectorFloat(matrix.multiply(vector));
-            logger.trace("Transformed: [{}] to [{}]", queryVector, transformedQueryVector);
+            float[] transformedQueryVector = toFloatArray(AssemblingUtils.unargumentVector(matrix.multiply(vector)));
+            logger.trace("Transformed: [{}] to [{}]", v, transformedQueryVector);
             listener.onResponse(transformedQueryVector);
-        } catch (IllegalArgumentException e) {
+        } catch (Exception e) {
             listener.onFailure(e);
         }
     }
@@ -122,9 +207,10 @@ public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilde
 
         if (o == null) {
             return false;
-        } else if (o instanceof AffineTransformationQueryVectorBuilder) {
-            AffineTransformationQueryVectorBuilder obj = (AffineTransformationQueryVectorBuilder) o;
-            return Objects.equals(queryVector, obj.queryVector) && Objects.equals(transformationMatrix, obj.transformationMatrix);
+        } else if (o instanceof AffineTransformationQueryVectorBuilder obj) {
+            return Objects.equals(queryVector, obj.queryVector)
+                && Objects.equals(queryVectorBuilder, obj.queryVectorBuilder)
+                && Objects.equals(transformationMatrix, obj.transformationMatrix);
         } else {
             return false;
         }
@@ -134,6 +220,6 @@ public class AffineTransformationQueryVectorBuilder implements QueryVectorBuilde
     public int hashCode() {
         logger.trace("Called: hashCode()");
 
-        return Objects.hash(this.getClass(), Objects.hash(queryVector, transformationMatrix));
+        return Objects.hash(this.getClass(), Objects.hash(queryVector, queryVectorBuilder, transformationMatrix));
     }
 }

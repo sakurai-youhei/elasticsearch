@@ -14,27 +14,52 @@ import org.apache.commons.math3.linear.RealMatrixFormat;
 import java.util.Arrays;
 import java.util.List;
 
+import static org.elasticsearch.common.Strings.format;
+
 public class AssemblingUtils {
     private static final RealMatrixFormat realMatrixFormat = new RealMatrixFormat("[", "]", "[", "]", ",", ",");
 
-    public static double[] extractVector(Object o) {
+    public static double[] extractDoubleArray(Object o) {
         if (o == null) {
-            throw new IllegalArgumentException("object [null] is not a vector");
+            throw new IllegalArgumentException("object [null] is not an array");
         }
 
         IllegalArgumentException e = new IllegalArgumentException(
-            "object [" + o + "] of type [" + o.getClass().getName() + "] is not a vector"
+            format("object [%s] of type [%s] is not an array", o, o.getClass().getName())
         );
         if (o instanceof List<?> list) {
-            final double[] vector = new double[list.size()];
+            final double[] array = new double[list.size()];
             for (int i = 0; i < list.size(); i++) {
                 if (list.get(i) instanceof Number num) {
-                    vector[i] = num.doubleValue();
+                    array[i] = num.doubleValue();
                 } else {
                     throw e;
                 }
             }
-            return vector;
+            return array;
+        } else {
+            throw e;
+        }
+    }
+
+    public static float[] extractFloatArray(Object o) {
+        if (o == null) {
+            throw new IllegalArgumentException("object [null] is not an array");
+        }
+
+        IllegalArgumentException e = new IllegalArgumentException(
+            format("object [%s] of type [%s] is not an array", o, o.getClass().getName())
+        );
+        if (o instanceof List<?> list) {
+            final float[] array = new float[list.size()];
+            for (int i = 0; i < list.size(); i++) {
+                if (list.get(i) instanceof Number num) {
+                    array[i] = num.floatValue();
+                } else {
+                    throw e;
+                }
+            }
+            return array;
         } else {
             throw e;
         }
@@ -47,17 +72,7 @@ public class AssemblingUtils {
     }
 
     public static double[] unargumentVector(RealMatrix vector) {
-        final int N = vector.getRowDimension() - 1;
-        return vector.getColumnVector(0).getSubVector(0, N).toArray();
-    }
-
-    public static float[] unargumentVectorFloat(RealMatrix vector) {
-        double[] unargumentedVector = unargumentVector(vector);
-        float[] unargumentedVectorFloat = new float[unargumentedVector.length];
-        for (int i = 0; i < unargumentedVector.length; i++) {
-            unargumentedVectorFloat[i] = (float) unargumentedVector[i];
-        }
-        return unargumentedVectorFloat;
+        return vector.getColumnVector(0).getSubVector(0, vector.getRowDimension() - 1).toArray();
     }
 
     public static RealMatrix parseTransformationMatrix(String source) throws IllegalArgumentException {
@@ -66,9 +81,25 @@ public class AssemblingUtils {
             throw new IllegalArgumentException("Can't parse source of transformation matrix: " + source);
         } else if (matrix.isSquare() == false) {
             throw new IllegalArgumentException(
-                "Transformation matrix is not square: " + matrix.getRowDimension() + "x" + matrix.getColumnDimension()
+                format("Transformation matrix is not square: %dx%d", matrix.getRowDimension(), matrix.getColumnDimension())
             );
         }
         return matrix;
+    }
+
+    public static float[] toFloatArray(double[] array) {
+        float[] arr = new float[array.length];
+        for (int i = 0; i < array.length; i++) {
+            arr[i] = (float) array[i];
+        }
+        return arr;
+    }
+
+    public static double[] toDoubleArray(float[] array) {
+        double[] arr = new double[array.length];
+        for (int i = 0; i < array.length; i++) {
+            arr[i] = (double) array[i];
+        }
+        return arr;
     }
 }
