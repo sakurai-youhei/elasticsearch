@@ -1,0 +1,64 @@
+setup:
+  - do:
+      indices.create:
+        index: decrypted-index
+        body:
+          mappings:
+            _source:
+              excludes:
+                - data
+            properties:
+              data:
+                type: decrypt
+                # Shared key (base64 endoced 'cryptographic key')
+                key: "Y3J5cHRvZ3JhcGhpYyBrZXk="
+                cipher: XOR
+---
+teardown:
+  - do:
+      indices.delete:
+        index: decrypted-index
+---
+"Test code-in to decrypt type - XOR":
+  - do:
+      index:
+        index: decrypted-index
+        body:
+          data: "NxoQA1QGFFIAUBgMDQ4="
+  - do:
+      indices.refresh: {}
+  - do:
+      search:
+        index: decrypted-index
+        body:
+          stored_fields:
+            - data
+          _source:
+            - data
+  - match: { hits.total.value: 1 }
+  - is_false: hits.hits.0._source.data
+  - match: { hits.hits.0.fields.data.0: "This is a pen." }
+---
+"Test code-out from decrypt type - XOR":
+  - do:
+      index:
+        index: decrypted-index
+        body:
+          data: "NxoQA1QGFFIAUBgMDQ4="
+  - do:
+      indices.refresh: {}
+  - do:
+      search:
+        index: decrypted-index
+        body:
+          fields:
+            - data
+          runtime_mappings:
+            data:
+              type: encrypt
+              # Shared key (base64 endoced 'cryptographic key')
+              key: "Y3J5cHRvZ3JhcGhpYyBrZXk="
+              cipher: XOR
+  - match: { hits.total.value: 1 }
+  - is_false: hits.hits.0._source.data
+  - match: { hits.hits.0.fields.data.0: "NxoQA1QGFFIAUBgMDQ4=" }

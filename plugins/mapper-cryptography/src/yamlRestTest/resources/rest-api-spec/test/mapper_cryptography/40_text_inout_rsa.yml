@@ -1,0 +1,82 @@
+setup:
+  - do:
+      indices.create:
+        index: encrypted-index
+        body:
+          mappings:
+            _source:
+              excludes:
+                - data
+            properties:
+              data:
+                type: encrypt
+                # PKCS8 public key (1024 bit)
+                key: |
+                  MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDPSlPkim0mrnhKrR2FQLhEbx+G
+                  cJNgLr/ggDXicc59Fxo5wCSe0t1tTOsStnEV3z+whZNcCqy9wUmYbcqqCBfURUZB
+                  TqInnCmFycj7VB3F3vsBU53wKAUm2CAEDi7IGHGoMq5BOjZJYa4zRzH+ra0Ch7//
+                  YKCzySE0Ei0taOXifwIDAQAB
+                cipher: RSA
+---
+teardown:
+  - do:
+      indices.delete:
+        index: encrypted-index
+---
+"Test text-in to encrypt type - RSA":
+  - do:
+      index:
+        index: encrypted-index
+        body:
+          data: "This is a pen."
+  - do:
+      indices.refresh: {}
+  - do:
+      search:
+        index: encrypted-index
+        body:
+          stored_fields:
+            - data
+          _source:
+            - data
+  - match: { hits.total.value: 1 }
+  - is_false: hits.hits.0._source.data
+  - is_true: hits.hits.0.fields.data
+---
+"Test text-out from encrypt type - RSA":
+  - do:
+      index:
+        index: encrypted-index
+        body:
+          data: "This is a pen."
+  - do:
+      indices.refresh: {}
+  - do:
+      search:
+        index: encrypted-index
+        body:
+          fields:
+            - data
+          runtime_mappings:
+            data:
+              type: decrypt
+              # PKCS8 private key (1024 bit)
+              key: |
+                MIICeAIBADANBgkqhkiG9w0BAQEFAASCAmIwggJeAgEAAoGBAM9KU+SKbSaueEqt
+                HYVAuERvH4Zwk2Auv+CANeJxzn0XGjnAJJ7S3W1M6xK2cRXfP7CFk1wKrL3BSZht
+                yqoIF9RFRkFOoiecKYXJyPtUHcXe+wFTnfAoBSbYIAQOLsgYcagyrkE6NklhrjNH
+                Mf6trQKHv/9goLPJITQSLS1o5eJ/AgMBAAECgYEAu8WStQWH1nBY2xxyD1EPGj6n
+                CftUJN50RYMeTJ/W8o1I3mNlSNGubuIsVukZCz0NznNRhyDMVZ+PcRqTaO6n1amf
+                2s2lzOBnEVOy3FjhxzNv0s84NuashZX9zgEeRQho8aYcw4V5eEKMWFisS6m8bkTM
+                wtL3f5jOmYiMRf3tAWECQQDw3gUxnTc5sx/k49x99yEND5DYS/MAYK0O6mRFwdeu
+                nDRHNfAIwguDFdnOin7noXp0H2CFkgOaYIIEw/w6SeAXAkEA3FBGMo+Dv/68F6P6
+                y8ZyOUDsjHy2xn++NdQf5TZ7zJEYVQF7c7heErxr+ZrCY4tseRtonhtdHnxy2yGQ
+                SH7p2QJBAO0YryYiap0qfIez4HRCUk9n9h1jzYSepVtcUG32HJftfOxn5KrKT8iu
+                NqM/4yGg60fpJvr0OwW4X+PPA7Zgx+sCQHC2nQNXCyeZ8q8BlNjWITALeDnzwCrT
+                xgOSD/NbqYCiJtmulXNButdJENC1jYgSF5/qFt70zvI+5yAXDtMYIxkCQQDGz+Ye
+                0/1qHWgGisRbEMrr0OxQbVLBWbWCSYYGDT5cUvaWeizv8b5ibIYLao9ELhcRtB+P
+                Kvo7yB1g6wD6lXRV
+              cipher: RSA
+  - match: { hits.total.value: 1 }
+  - is_false: hits.hits.0._source.data
+  - match: { hits.hits.0.fields.data.0: "This is a pen." }

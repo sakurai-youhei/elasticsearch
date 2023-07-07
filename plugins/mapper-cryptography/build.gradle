@@ -1,0 +1,16 @@
+
+apply plugin: 'elasticsearch.esplugin'
+apply plugin: 'elasticsearch.legacy-yaml-rest-test'
+
+esplugin {
+  name 'mapper-cryptography'
+  description 'The Mapper Cryptography plugin adds encrypt and decrypt field data types'
+  classname 'com.github.sakurai_youhei.elasticsearch.plugin.mapper.MapperCryptographyPlugin'
+}
+
+testClusters.configureEach {
+  testDistribution = 'DEFAULT'
+
+  setting 'logger.com.github.sakurai_youhei.elasticsearch.index.mapper.cryptography', 'trace'
+  setting 'xpack.security.enabled', 'false'
+}
