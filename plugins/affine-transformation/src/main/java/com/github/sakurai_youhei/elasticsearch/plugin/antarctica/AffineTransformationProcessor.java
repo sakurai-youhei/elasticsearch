@@ -111,7 +111,8 @@ public final class AffineTransformationProcessor extends AbstractProcessor {
         } catch (IllegalArgumentException e) {
             if (transformationMatrixFieldValue instanceof List<?> list) {
                 if (list.isEmpty()) {
-                    throw new IllegalArgumentException(format("field [%s] is empty array", transformationMatrixField));
+                    logger.trace("field [{}] is empty array", transformationMatrixField);
+                    return document;
                 }
                 Iterator<?> iter = list.iterator();
                 matrix = tryParseTransformationMatrix(iter.next());
